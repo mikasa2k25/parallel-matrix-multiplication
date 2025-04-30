@@ -2,73 +2,75 @@
 #include <vector>
 #include <thread>
 #include <chrono>
-#include <algorithm>
 
 using namespace std;
+using namespace std::chrono;
 
-// Serial matrix multiplication
-void serialMultiply(const vector<int>& A, const vector<int>& B, vector<int>& C, int size) {
-    for (int i = 0; i < size; ++i) {
-        for (int k = 0; k < size; ++k) {
-            int a = A[i * size + k];
-            for (int j = 0; j < size; ++j) {
-                C[i * size + j] += a * B[k * size + j];
-            }
-        }
-    }
+const int SIZE = 500; // You can increase this for better performance comparisons
+
+using Matrix = vector<vector<int>>;
+
+Matrix generateMatrix(int rows, int cols) {
+    Matrix mat(rows, vector<int>(cols));
+    for (int i = 0; i < rows; ++i)
+        for (int j = 0; j < cols; ++j)
+            mat[i][j] = rand() % 10;
+    return mat;
 }
 
-// Parallel block-wise multiplication
-void parallelMultiply(const vector<int>& A, const vector<int>& B, vector<int>& C, 
-                      int size, int startRow, int endRow, int blockSize = 64) {
-    for (int i = startRow; i < endRow; i += blockSize) {
-        for (int k = 0; k < size; k += blockSize) {
-            for (int j = 0; j < size; j += blockSize) {
-                for (int ii = i; ii < min(i + blockSize, endRow); ++ii) {
-                    for (int kk = k; kk < min(k + blockSize, size); ++kk) {
-                        int a = A[ii * size + kk];
-                        for (int jj = j; jj < min(j + blockSize, size); ++jj) {
-                            C[ii * size + jj] += a * B[kk * size + jj];
-                        }
-                    }
-                }
-            }
-        }
+Matrix singleThreadedMultiply(const Matrix& A, const Matrix& B) {
+    int n = A.size(), m = B[0].size(), p = B.size();
+    Matrix C(n, vector<int>(m, 0));
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < m; ++j)
+            for (int k = 0; k < p; ++k)
+                C[i][j] += A[i][k] * B[k][j];
+    return C;
+}
+
+void multiplyPartial(const Matrix& A, const Matrix& B, Matrix& C, int startRow, int endRow) {
+    int m = B[0].size(), p = B.size();
+    for (int i = startRow; i < endRow; ++i)
+        for (int j = 0; j < m; ++j)
+            for (int k = 0; k < p; ++k)
+                C[i][j] += A[i][k] * B[k][j];
+}
+
+Matrix multiThreadedMultiply(const Matrix& A, const Matrix& B, int numThreads) {
+    int n = A.size();
+    Matrix C(n, vector<int>(B[0].size(), 0));
+    vector<thread> threads;
+    int chunkSize = n / numThreads;
+
+    for (int t = 0; t < numThreads; ++t) {
+        int start = t * chunkSize;
+        int end = (t == numThreads - 1) ? n : start + chunkSize;
+        threads.emplace_back(multiplyPartial, ref(A), ref(B), ref(C), start, end);
     }
+
+    for (auto& th : threads)
+        th.join();
+
+    return C;
 }
 
 int main() {
-    const int size = 1024; // Large matrix for GitHub’s multi-core servers
-    vector<int> A(size * size, 1);
-    vector<int> B(size * size, 1);
-    vector<int> C_serial(size * size, 0);
-    vector<int> C_parallel(size * size, 0);
+    Matrix A = generateMatrix(SIZE, SIZE);
+    Matrix B = generateMatrix(SIZE, SIZE);
 
-    // Serial execution
-    auto start = chrono::high_resolution_clock::now();
-    serialMultiply(A, B, C_serial, size);
-    auto end = chrono::high_resolution_clock::now();
-    chrono::duration<double> serialTime = end - start;
+    cout << "Starting single-threaded multiplication...\n";
+    auto start1 = high_resolution_clock::now();
+    Matrix C1 = singleThreadedMultiply(A, B);
+    auto end1 = high_resolution_clock::now();
+    cout << "Single-threaded time: " 
+         << duration_cast<milliseconds>(end1 - start1).count() << " ms\n";
 
-    // Parallel execution
-    int numThreads = thread::hardware_concurrency(); // Use all available cores
-    vector<thread> threads;
-    int rowsPerThread = size / numThreads;
-    start = chrono::high_resolution_clock::now();
-    for (int t = 0; t < numThreads; ++t) {
-        int startRow = t * rowsPerThread;
-        int endRow = (t == numThreads - 1) ? size : startRow + rowsPerThread;
-        threads.emplace_back(parallelMultiply, cref(A), cref(B), ref(C_parallel), 
-                            size, startRow, endRow);
-    }
-    for (auto& th : threads) th.join();
-    end = chrono::high_resolution_clock::now();
-    chrono::duration<double> parallelTime = end - start;
+    cout << "Starting multi-threaded multiplication...\n";
+    auto start2 = high_resolution_clock::now();
+    Matrix C2 = multiThreadedMultiply(A, B, thread::hardware_concurrency());
+    auto end2 = high_resolution_clock::now();
+    cout << "Multi-threaded time: " 
+         << duration_cast<milliseconds>(end2 - start2).count() << " ms\n";
 
-    // Results
-    cout << "Matrix Size: " << size << "x" << size << endl;
-    cout << "[Serial] Time: " << serialTime.count() << "s\n";
-    cout << "[Parallel] Time: " << parallelTime.count() << "s\n";
-    cout << "Speedup: " << serialTime.count() / parallelTime.count() << "x\n";
     return 0;
 }
