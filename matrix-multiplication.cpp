@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
     int SIZE = 1000;
     int NUM_THREADS = 4;
 
-    // Allow command-line override: ./matrix 2000 8
+    // Allow command-line override: ./matrix <input size> <input thread>
     if (argc >= 2) SIZE = atoi(argv[1]);
     if (argc >= 3) NUM_THREADS = atoi(argv[2]);
 
